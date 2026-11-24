@@ -3596,7 +3596,23 @@ document.querySelectorAll('[data-action="kruskal-text"]').forEach(knopf => {
     ctx.setTransform(r, 0, 0, r, 0, 0);
   }
 
+  // iPad (iPadOS meldet sich als Mac, verraet sich aber durch den Touchscreen): Safari beendet das Vollbild bei
+  // schnellen Wischgesten selbst. Darum den Vollbildmodus beim Einschalten des Lasers vorher verlassen und beim
+  // Ausschalten wiederherstellen - der Knopfdruck ist die Nutzergeste, die requestFullscreen braucht.
+  const IPAD = /iPad/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let vollbildVorher = false;
+
   function schalten(neu) {
+    if (IPAD && neu !== an) {
+      if (neu) {
+        vollbildVorher = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+        if (vollbildVorher) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else if (vollbildVorher) {
+        vollbildVorher = false;
+        const el = document.documentElement, rf = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (rf) { const p = rf.call(el); if (p && p.catch) p.catch(() => {}); }
+      }
+    }
     an = neu;
     flaeche.hidden = !an;
     knopf.setAttribute('aria-pressed', String(an));
