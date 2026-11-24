@@ -3492,9 +3492,24 @@ body.folien-modus { display: flex; flex-direction: column; background: #f7f8fa; 
 
   reiter.forEach((r, i) => r.addEventListener('click', () => zeige(i)));
 
+  // Vollbild (mit webkit-Präfix für ältere iPads). „gewollt“ merkt, ob die Lehrkraft Vollbild eingeschaltet hat.
+  const VB = window.FolienVollbild = {
+    gewollt: false,
+    aktiv: () => !!(document.fullscreenElement || document.webkitFullscreenElement),
+    betreten() {
+      const el = document.documentElement;
+      const f = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!f) return;
+      try { const r = f.call(el); if (r && r.catch) r.catch(() => {}); } catch (e) { /* ohne Nutzergeste abgelehnt */ }
+    },
+    verlassen() {
+      const f = document.exitFullscreen || document.webkitExitFullscreen;
+      if (f) { const r = f.call(document); if (r && r.catch) r.catch(() => {}); }
+    },
+  };
   function vollbild() {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    if (VB.aktiv()) { VB.gewollt = false; VB.verlassen(); }
+    else { VB.gewollt = true; VB.betreten(); }
   }
   document.querySelector('.folien-vollbild').addEventListener('click', vollbild);
   // Als App vom Home-Bildschirm gestartet: schon randlos, der Vollbild-Knopf wird nicht gebraucht
@@ -3589,6 +3604,22 @@ document.querySelectorAll('[data-action="kruskal-text"]').forEach(knopf => {
   const ctx = flaeche.getContext('2d');
   const HALTEN = 500, VERBLASSEN = 700;          // ms nach dem Absetzen: erst stehen lassen, dann ausblenden
   let an = false, punkt = null, striche = [], strich = null, laeuft = false, letztesEnde = 0;
+  let letzteBeruehrung = -1e9, verloren = false;
+  const VB = window.FolienVollbild;
+
+  // iPad/Safari beendet das Vollbild bei schnellen Wischbewegungen selbst – das lässt sich nicht verhindern.
+  // Geschieht das beim Zeichnen mit dem Laser, wird es bei der nächsten Berührung wieder eingeschaltet.
+  function vollbildWechsel() {
+    if (VB.aktiv()) { verloren = false; return; }
+    const beimZeichnen = an && (strich || performance.now() - letzteBeruehrung < 1500);
+    if (VB.gewollt && beimZeichnen) verloren = true;
+    else { VB.gewollt = false; verloren = false; }
+  }
+  document.addEventListener('fullscreenchange', vollbildWechsel);
+  document.addEventListener('webkitfullscreenchange', vollbildWechsel);
+  function wiederherstellen() {
+    if (verloren && VB.gewollt && !VB.aktiv()) { verloren = false; VB.betreten(); }
+  }
 
   function groesse() {
     const r = window.devicePixelRatio || 1;
@@ -3647,14 +3678,18 @@ document.querySelectorAll('[data-action="kruskal-text"]').forEach(knopf => {
     e.preventDefault();
     flaeche.setPointerCapture(e.pointerId);
     punkt = pos(e); strich = {pkte: [punkt]}; striche.push(strich); starten();
+    letzteBeruehrung = performance.now();
+    wiederherstellen();
   });
   flaeche.addEventListener('pointermove', e => {
     const liste = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     if (strich) (liste.length ? liste : [e]).forEach(c => strich.pkte.push(pos(c)));
     punkt = pos(e); starten();
+    if (e.pointerType !== 'mouse' || strich) letzteBeruehrung = performance.now();
   });
   function absetzen(e) {
-    if (strich) { letztesEnde = performance.now(); strich = null; }
+    if (strich) { letztesEnde = letzteBeruehrung = performance.now(); strich = null; }
+    if (e.type === 'pointerup') wiederherstellen();
     // Stift/Finger: Punkt verschwindet beim Absetzen; Maus: Punkt bleibt sichtbar
     if (e.pointerType !== 'mouse') punkt = null;
     starten();
@@ -3666,9 +3701,12 @@ document.querySelectorAll('[data-action="kruskal-text"]').forEach(knopf => {
   // iPad/Safari: Touch-Gesten selbst abfangen, damit schnelles Wischen nicht als Systemgeste (Vollbild beenden,
   // Zurück-Wischen, Zoomen) erkannt wird. Pointer-Events kommen trotzdem an.
   ['touchstart', 'touchmove', 'touchend', 'gesturestart', 'gesturechange'].forEach(t =>
-    flaeche.addEventListener(t, e => { if (e.cancelable) e.preventDefault(); }, {passive: false}));
+    flaeche.addEventListener(t, e => {
+      if (e.cancelable) e.preventDefault();
+      if (t === 'touchend') wiederherstellen();   // touchend zählt in Safari sicher als Nutzergeste
+    }, {passive: false}));
 
-  knopf.addEventListener('click', () => schalten(!an));
+  knopf.addEventListener('click', () => { wiederherstellen(); schalten(!an); });
   document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'l' || e.key === 'L') schalten(!an);
