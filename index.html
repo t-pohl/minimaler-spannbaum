@@ -5,6 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Minimaler Spannbaum – Simulationen fürs Plenum</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Spannbaum">
   <style>
 /* ===================== Reset & Base ===================== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -3493,6 +3497,10 @@ body.folien-modus { display: flex; flex-direction: column; background: #f7f8fa; 
     else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
   }
   document.querySelector('.folien-vollbild').addEventListener('click', vollbild);
+  // Als App vom Home-Bildschirm gestartet: schon randlos, der Vollbild-Knopf wird nicht gebraucht
+  if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) {
+    document.querySelector('.folien-vollbild').hidden = true;
+  }
 
   document.addEventListener('keydown', e => {
     if (e.ctrlKey || e.altKey || e.metaKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
@@ -3655,6 +3663,10 @@ document.querySelectorAll('[data-action="kruskal-text"]').forEach(knopf => {
   flaeche.addEventListener('pointercancel', absetzen);
   flaeche.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !strich) { punkt = null; } });
   flaeche.addEventListener('contextmenu', e => e.preventDefault());
+  // iPad/Safari: Touch-Gesten selbst abfangen, damit schnelles Wischen nicht als Systemgeste (Vollbild beenden,
+  // Zurück-Wischen, Zoomen) erkannt wird. Pointer-Events kommen trotzdem an.
+  ['touchstart', 'touchmove', 'touchend', 'gesturestart', 'gesturechange'].forEach(t =>
+    flaeche.addEventListener(t, e => { if (e.cancelable) e.preventDefault(); }, {passive: false}));
 
   knopf.addEventListener('click', () => schalten(!an));
   document.addEventListener('keydown', e => {
