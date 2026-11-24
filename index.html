@@ -3353,6 +3353,17 @@ body.folien-modus { display: flex; flex-direction: column; background: #f7f8fa; 
 .kruskal-text h2 { font-size: 1.25em; line-height: 1.2; margin-bottom: 1.5vh; color: #0f3d4a; }
 .kruskal-text[hidden] { display: none; }
 
+/* Laserpointer */
+.folien-laser { margin-left: auto; border: 0; background: transparent; color: #d7e6ea; cursor: pointer;
+  padding: 0 .55rem; display: inline-flex; align-items: center; border-radius: 8px; }
+.folien-laser + .folien-vollbild { margin-left: 0; }
+.folien-laser:hover { color: #fff; }
+.folien-laser[aria-pressed=true] { background: #ef4444; color: #fff; position: relative; z-index: 3001;
+  box-shadow: 0 0 0 2px #fecaca; }
+.laser-flaeche { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 3000; cursor: none;
+  touch-action: none; -webkit-user-select: none; user-select: none; }
+.laser-flaeche[hidden] { display: none; }
+
 </style>
 <nav class="folien-reiter" role="tablist" aria-label="Folien">
   <button type="button" role="tab" data-folie="0">1 · Glasfaser für die Ortsteile</button>
@@ -3361,8 +3372,10 @@ body.folien-modus { display: flex; flex-direction: column; background: #f7f8fa; 
   <button type="button" role="tab" data-folie="3">4 · Minimaler Spannbaum</button>
   <button type="button" role="tab" data-folie="4">5 · Kruskal</button>
   <button type="button" role="tab" data-folie="5">6 · Simulation 3</button>
+  <button type="button" class="folien-laser" title="Laserpointer (L)" aria-label="Laserpointer" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14.5 9.5 4 20"/><path d="M16.8 11.8 6.3 22.3"/><path d="M14.5 9.5l2.3 2.3"/><path d="M4 20l2.3 2.3"/><path d="M19 2.5v2M21.5 5h-2M16.3 2.8l1.2 1.2M21.2 7.7 20 6.5"/></g><circle cx="18.3" cy="6.2" r="2.1" fill="#ef4444"/></svg></button>
   <button type="button" class="folien-vollbild" title="Vollbild (F)" aria-label="Vollbild">⛶</button>
 </nav>
+<canvas class="laser-flaeche" hidden></canvas>
 <main class="folien">
   <section class="folie folie-text" role="tabpanel">
     <div class="content-block block-info">
@@ -3558,6 +3571,99 @@ document.querySelectorAll('[data-action="kruskal-text"]').forEach(knopf => {
     knopf.textContent = text.hidden ? 'Beschreibung einblenden' : 'Beschreibung ausblenden';
   });
 });
+
+/* Laserpointer wie in Goodnotes: roter Punkt folgt Maus/Stift, beim Ziehen leuchtende Spur, die nach dem Absetzen
+   verblasst. Eine durchsichtige Fläche über der Seite fängt alle Klicks ab; nur der Laser-Knopf bleibt darüber. */
+(function () {
+  'use strict';
+  const knopf = document.querySelector('.folien-laser');
+  const flaeche = document.querySelector('.laser-flaeche');
+  const ctx = flaeche.getContext('2d');
+  const HALTEN = 500, VERBLASSEN = 700;          // ms nach dem Absetzen: erst stehen lassen, dann ausblenden
+  let an = false, punkt = null, striche = [], strich = null, laeuft = false, letztesEnde = 0;
+
+  function groesse() {
+    const r = window.devicePixelRatio || 1;
+    flaeche.width = Math.round(innerWidth * r); flaeche.height = Math.round(innerHeight * r);
+    ctx.setTransform(r, 0, 0, r, 0, 0);
+  }
+
+  function schalten(neu) {
+    an = neu;
+    flaeche.hidden = !an;
+    knopf.setAttribute('aria-pressed', String(an));
+    punkt = null; striche = []; strich = null;
+    if (an) { groesse(); starten(); }
+  }
+
+  function starten() { if (!laeuft) { laeuft = true; requestAnimationFrame(malen); } }
+
+  function linie(pkte, alpha) {
+    if (pkte.length < 2 || alpha <= 0) return;
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(pkte[0].x, pkte[0].y);
+    for (let i = 1; i < pkte.length - 1; i++) {
+      const mx = (pkte[i].x + pkte[i + 1].x) / 2, my = (pkte[i].y + pkte[i + 1].y) / 2;
+      ctx.quadraticCurveTo(pkte[i].x, pkte[i].y, mx, my);
+    }
+    const l = pkte[pkte.length - 1]; ctx.lineTo(l.x, l.y);
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = 'rgba(255, 40, 40, .9)'; ctx.shadowBlur = 18;
+    ctx.strokeStyle = 'rgba(255, 60, 60, .55)'; ctx.lineWidth = 12; ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#ffe4e4'; ctx.lineWidth = 3.5; ctx.stroke();
+    ctx.restore();
+  }
+
+  function malen(jetzt) {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    // Alle Striche gehören zusammen: Sie verblassen erst gemeinsam, wenn nach dem letzten Absetzen nichts Neues kommt
+    const alpha = strich ? 1 : Math.min(1, 1 - (jetzt - letztesEnde - HALTEN) / VERBLASSEN);
+    if (alpha <= 0) striche = [];
+    striche.forEach(s => linie(s.pkte, alpha));
+    if (punkt) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 30, 30, 1)'; ctx.shadowBlur = 22;
+      ctx.fillStyle = 'rgba(255, 50, 50, .85)';
+      ctx.beginPath(); ctx.arc(punkt.x, punkt.y, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0; ctx.fillStyle = '#fff5f5';
+      ctx.beginPath(); ctx.arc(punkt.x, punkt.y, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    if (an && (punkt || striche.length)) requestAnimationFrame(malen); else laeuft = false;
+  }
+
+  const pos = e => ({x: e.clientX, y: e.clientY});
+  flaeche.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    flaeche.setPointerCapture(e.pointerId);
+    punkt = pos(e); strich = {pkte: [punkt]}; striche.push(strich); starten();
+  });
+  flaeche.addEventListener('pointermove', e => {
+    const liste = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    if (strich) (liste.length ? liste : [e]).forEach(c => strich.pkte.push(pos(c)));
+    punkt = pos(e); starten();
+  });
+  function absetzen(e) {
+    if (strich) { letztesEnde = performance.now(); strich = null; }
+    // Stift/Finger: Punkt verschwindet beim Absetzen; Maus: Punkt bleibt sichtbar
+    if (e.pointerType !== 'mouse') punkt = null;
+    starten();
+  }
+  flaeche.addEventListener('pointerup', absetzen);
+  flaeche.addEventListener('pointercancel', absetzen);
+  flaeche.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse' && !strich) { punkt = null; } });
+  flaeche.addEventListener('contextmenu', e => e.preventDefault());
+
+  knopf.addEventListener('click', () => schalten(!an));
+  document.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (e.key === 'l' || e.key === 'L') schalten(!an);
+    else if (e.key === 'Escape' && an) schalten(false);
+  });
+  addEventListener('resize', () => { if (an) groesse(); });
+}());
 
 </script>
 
